@@ -3,7 +3,7 @@
 package reporters
 
 import firrtl.{Transform, LowForm, CircuitState, Utils, WRef, WSubField, WDefInstance}
-import firrtl.ir.{Circuit, Module, DefModule, DefRegister, Statement, Expression, Mux, UIntLiteral, SIntLiteral, DoPrim, UIntType, SIntType, IntWidth, Connect, Block, EmptyStmt, IsInvalid, Field, DefNode, DefWire, DefMemory, Stop, Print}
+import firrtl.ir.{Circuit, Module, DefModule, DefRegister, Statement, Expression, Mux, UIntLiteral, SIntLiteral, DoPrim, UIntType, SIntType, IntWidth, Connect, Block, EmptyStmt, IsInvalid, Field, DefNode, DefWire, DefMemory, Stop, Print, Type}
 import firrtl.Mappers._
 
 import scala.collection.mutable
@@ -20,16 +20,34 @@ case class AreaAnnotation( val area : Int) extends NoTargetAnnotation {
   def value: String = s"${area}"
 }
 
+case class PowerAnnotation(val opType : String, val inputNames : List[String], val tpe : Type) extends NoTargetAnnotation
+
 class Ledger {
 
   private var moduleName: Option[String] = None
 
   private val moduleOpMap = mutable.Map[String,mutable.Map[Area,Int]]()
 
+  val moduleOpInputsMap = mutable.Map[String,mutable.ListBuffer[PowerAnnotation]]()
+
   def foundOp( a : Area): Unit = {
     val innerMap = moduleOpMap(getModuleName)
     innerMap(a) = innerMap.getOrElse( a, 0) + 1
   }
+
+  def registerInputs(opType: String, inputs: List[Expression], tpe: Type): Unit = {
+    if (!moduleOpInputsMap.contains(getModuleName)) moduleOpInputsMap += (getModuleName -> mutable.ListBuffer[PowerAnnotation]())
+    val innerInputsMap = moduleOpInputsMap(getModuleName)
+    innerInputsMap += PowerAnnotation(opType, inputs.map(getExprName(_)), tpe)
+  }
+
+  private def getExprName(e: Expression): String = {
+    e match {
+      case WRef(name, _, _, _) => name
+      case _ => "ERROR"
+    }
+  }
+
   def getModuleName: String = moduleName match {
     case None => Utils.error("Module name not defined in Ledger!")
     case Some(name) => name
@@ -47,7 +65,7 @@ class Ledger {
     val ts = TopoSort( moduleOpMap.keys.toSeq, arcs.toSeq)
     for{ nm <- ts} {
       val area = ComputeArea(moduleOpMap(nm),tbl)
-      val areas = for{ (k,v) <- moduleOpMap(nm)} yield (s"$k", v, ComputeArea(k,tbl))
+      val areas = for{ (k,v) <- moduleOpMap(nm)} yield (s"$k", v, ComputeArea(k,tbl)) // (k,v) is the pair of module and count
 
       val sortedAreas = areas.toList.sortWith{ case (x,y) => (-x._2*x._3,x._1) < (-y._2*y._3,y._1)}
 
@@ -101,6 +119,8 @@ class Ledger {
 
   }
 
+  def getmoduleOpMap : mutable.Map[String,mutable.Map[Area,Int]] = moduleOpMap
+
 }
 
 class ReportArea extends Transform {
@@ -130,6 +150,16 @@ class ReportArea extends Transform {
     state.copy( annotations = state.annotations ++ Seq(AreaAnnotation( area)))
   }
 
+  def execute(circuit: Circuit): Circuit = {
+    val ledger = new Ledger()
+    circuit map walkModule(ledger)
+    val area = ledger.report
+    println(ledger.moduleOpInputsMap)
+    // ledger.reportJson( circuit, "areas.json")
+
+    circuit
+  }
+
   def walkModule(ledger: Ledger)(m: DefModule): DefModule = {
     ledger.setModuleName(m.name)
     m map walkStatement(ledger)
@@ -144,7 +174,7 @@ class ReportArea extends Transform {
       case DefRegister( info, lhs, tpe, clock, reset, init) =>
         ledger.foundOp( AreaRegister( extractWidth( tpe)))
       case DefMemory( info, nm, tpe, sz, wrLat, rdLat, readers, writers, readWriters, _) =>
-        ledger.foundOp( AreaMemory( extractWidth( tpe), sz, readers.length, writers.length, readWriters.length))
+        ledger.foundOp( AreaMemory( extractWidth( tpe), sz.toInt, readers.length, writers.length, readWriters.length))
       case _ : Block => ()
       case _ : DefNode => ()
       case _ : DefWire => ()
@@ -180,8 +210,10 @@ class ReportArea extends Transform {
 
         val c = inps.foldLeft( 0){ case (l,r) => l + isConst(r)}
         ledger.foundOp( AreaOp( s"${op}", inpSizes, extractWidth(tpe), c))
+        ledger.registerInputs(s"${op}", inps.toList, tpe)
       case _ => ()
     }
     e
   }
 }
+
