@@ -2,7 +2,7 @@
 
 package reporters
 
-import firrtl.{Transform, LowForm, CircuitState, Utils, WRef, WSubField, WDefInstance}
+import firrtl.{Transform, LowForm, CircuitState, Utils, WRef, WSubField, WDefInstance, RegKind}
 import firrtl.ir.{Circuit, Module, DefModule, DefRegister, Statement, Expression, Mux, UIntLiteral, SIntLiteral, DoPrim, UIntType, SIntType, IntWidth, Connect, Block, EmptyStmt, IsInvalid, Field, DefNode, DefWire, DefMemory, Stop, Print, Type}
 import firrtl.Mappers._
 
@@ -20,7 +20,7 @@ case class AreaAnnotation( val area : Int) extends NoTargetAnnotation {
   def value: String = s"${area}"
 }
 
-case class PowerAnnotation(val opType : String, val inputNames : List[String], val tpe : Type) extends NoTargetAnnotation
+case class PowerAnnotation(val name : String, val opType : String, val tpe : Type) extends NoTargetAnnotation
 
 class Ledger {
 
@@ -28,17 +28,11 @@ class Ledger {
 
   private val moduleOpMap = mutable.Map[String,mutable.Map[Area,Int]]()
 
-  val moduleOpInputsMap = mutable.Map[String,mutable.ListBuffer[PowerAnnotation]]()
+  private val moduleOpInputsMap = mutable.Map[String,mutable.ListBuffer[PowerAnnotation]]()
 
   def foundOp( a : Area): Unit = {
     val innerMap = moduleOpMap(getModuleName)
     innerMap(a) = innerMap.getOrElse( a, 0) + 1
-  }
-
-  def registerInputs(opType: String, inputs: List[Expression], tpe: Type): Unit = {
-    if (!moduleOpInputsMap.contains(getModuleName)) moduleOpInputsMap += (getModuleName -> mutable.ListBuffer[PowerAnnotation]())
-    val innerInputsMap = moduleOpInputsMap(getModuleName)
-    innerInputsMap += PowerAnnotation(opType, inputs.map(getExprName(_)), tpe)
   }
 
   private def getExprName(e: Expression): String = {
@@ -46,6 +40,12 @@ class Ledger {
       case WRef(name, _, _, _) => name
       case _ => "ERROR"
     }
+  }
+
+  def registerPowerSignal(name: String, opType: String, tpe: Type): Unit = {
+    if (!moduleOpInputsMap.contains(getModuleName)) moduleOpInputsMap += (getModuleName -> mutable.ListBuffer[PowerAnnotation]())
+    val innerInputsMap = moduleOpInputsMap(getModuleName)
+    innerInputsMap += PowerAnnotation(name, opType, tpe)
   }
 
   def getModuleName: String = moduleName match {
@@ -121,6 +121,8 @@ class Ledger {
 
   def getmoduleOpMap : mutable.Map[String,mutable.Map[Area,Int]] = moduleOpMap
 
+  def getmoduleOpInputsMap : mutable.Map[String,mutable.ListBuffer[PowerAnnotation]] = moduleOpInputsMap
+
 }
 
 class ReportArea extends Transform {
@@ -150,18 +152,17 @@ class ReportArea extends Transform {
     state.copy( annotations = state.annotations ++ Seq(AreaAnnotation( area)))
   }
 
-  def execute(circuit: Circuit): Circuit = {
+  def moduleOpInputsMap(circuit: Circuit): mutable.Map[String, mutable.ListBuffer[PowerAnnotation]] = {
     val ledger = new Ledger()
     circuit map walkModule(ledger)
     val area = ledger.report
-    println(ledger.moduleOpInputsMap)
-    // ledger.reportJson( circuit, "areas.json")
-
-    circuit
+    print(ledger.getmoduleOpInputsMap("PassThrough"))
+    ledger.getmoduleOpInputsMap
   }
 
   def walkModule(ledger: Ledger)(m: DefModule): DefModule = {
     ledger.setModuleName(m.name)
+    m.ports.foreach(x => println(s"Found ${x.direction} Port ${x.name} of type ${x.tpe}"))
     m map walkStatement(ledger)
     m
   }
@@ -171,14 +172,24 @@ class ReportArea extends Transform {
     s match {
       case WDefInstance( info, instanceName, templateName, _) =>
         ledger.foundOp( AreaModule( s"$templateName", s"$instanceName"))
+        println(s"Found WDefInstance ${instanceName}")
       case DefRegister( info, lhs, tpe, clock, reset, init) =>
         ledger.foundOp( AreaRegister( extractWidth( tpe)))
+        ledger.registerPowerSignal(lhs, "reg", tpe)
       case DefMemory( info, nm, tpe, sz, wrLat, rdLat, readers, writers, readWriters, _) =>
         ledger.foundOp( AreaMemory( extractWidth( tpe), sz.toInt, readers.length, writers.length, readWriters.length))
-      case _ : Block => ()
-      case _ : DefNode => ()
-      case _ : DefWire => ()
-      case _ : Connect => ()
+        println(s"Found DefMemory ${nm}")
+      case _ : Block => println(s)
+      case DefNode(_, name, expr) => 
+        ledger.registerPowerSignal(name, getOpName(expr), expr.tpe)
+      case DefWire(_, name, _) => println(s"Found DefWire ${name}")
+      case Connect(_, loc, expr) => loc match {
+        case WRef(name, _, kind, _) => {
+          if (kind == RegKind) ledger.registerPowerSignal(name + "/in", getOpName(expr), expr.tpe)
+          else ledger.registerPowerSignal(name, getOpName(expr), expr.tpe)
+        }
+        case _ => println("Unimplemented Connect")
+      }
       case _ : Print => ()
       case _ : Stop => ()
       case EmptyStmt => () // EmptyStmt is an object
@@ -210,10 +221,18 @@ class ReportArea extends Transform {
 
         val c = inps.foldLeft( 0){ case (l,r) => l + isConst(r)}
         ledger.foundOp( AreaOp( s"${op}", inpSizes, extractWidth(tpe), c))
-        ledger.registerInputs(s"${op}", inps.toList, tpe)
       case _ => ()
     }
     e
   }
+
+  private def getOpName(e: Expression): String = {
+    e match {
+      case WRef(name, _, _, _) => name
+      case DoPrim(op, _, _, _) => op.serialize
+      case _ => "ERROR"
+    }
+  }
+
 }
 
