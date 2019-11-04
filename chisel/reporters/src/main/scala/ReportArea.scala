@@ -156,7 +156,6 @@ class ReportArea extends Transform {
     val ledger = new Ledger()
     circuit map walkModule(ledger)
     val area = ledger.report
-    print(ledger.getmoduleOpInputsMap("PassThrough"))
     ledger.getmoduleOpInputsMap
   }
 
@@ -179,7 +178,7 @@ class ReportArea extends Transform {
       case DefMemory( info, nm, tpe, sz, wrLat, rdLat, readers, writers, readWriters, _) =>
         ledger.foundOp( AreaMemory( extractWidth( tpe), sz.toInt, readers.length, writers.length, readWriters.length))
         println(s"Found DefMemory ${nm}")
-      case _ : Block => println(s)
+      case _ : Block => ()
       case DefNode(_, name, expr) => 
         ledger.registerPowerSignal(name, getOpName(expr), expr.tpe)
       case DefWire(_, name, _) => println(s"Found DefWire ${name}")
