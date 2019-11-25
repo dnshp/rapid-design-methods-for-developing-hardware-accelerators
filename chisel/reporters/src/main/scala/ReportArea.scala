@@ -171,7 +171,7 @@ class ReportArea extends Transform {
     s match {
       case WDefInstance( info, instanceName, templateName, _) =>
         ledger.foundOp( AreaModule( s"$templateName", s"$instanceName"))
-        println(s"Found WDefInstance ${instanceName}")
+        println(s"Found WDefInstance ${instanceName} : ${templateName}")
       case DefRegister( info, lhs, tpe, clock, reset, init) =>
         ledger.foundOp( AreaRegister( extractWidth( tpe)))
         ledger.registerPowerSignal(lhs, "reg", tpe)
@@ -186,6 +186,14 @@ class ReportArea extends Transform {
         case WRef(name, _, kind, _) => {
           if (kind == RegKind) ledger.registerPowerSignal(name + "/in", getOpName(expr), expr.tpe)
           else ledger.registerPowerSignal(name, getOpName(expr), expr.tpe)
+        }
+        case WSubField(subexpr, name, tpe, gender) => {
+          subexpr match {
+            case WRef(subname, _, subkind, _) => {
+              if (subkind == RegKind) ledger.registerPowerSignal(subname + "." + name + "/in", getOpName(expr), tpe)
+              else ledger.registerPowerSignal(subname + "." + name, getOpName(expr), tpe)
+            }
+          }
         }
         case _ => println("Unimplemented Connect")
       }
@@ -227,9 +235,11 @@ class ReportArea extends Transform {
 
   private def getOpName(e: Expression): String = {
     e match {
-      case WRef(name, _, _, _) => name
+      case WRef(name, _, _, _) => "connect"
+      case WSubField(_, _, _, _) => "connect"
+      case Mux(_, _, _, _) => "mux"
       case DoPrim(op, _, _, _) => op.serialize
-      case _ => "ERROR"
+      case _ => e.serialize
     }
   }
 

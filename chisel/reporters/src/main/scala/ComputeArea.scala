@@ -117,13 +117,18 @@ object ComputePower {
   }
 
   def apply( a : PowerAnnotation, activity : Float) : Float = a match {
+    case PowerAnnotation(name, "connect", tpe) => {
+      println(s"connect named $name of type $tpe")
+      0
+    }
     case PowerAnnotation(name, "add", tpe) => {
       println(s"add named $name of type $tpe")
       getTypeWidth(tpe).toFloat * activity //*(cMaj+2*cXor)
     }
-//     case PowerAnnotation( "add", List(w0,w1), w, 1) => w*(cNand( 2)+cXor)
-//     case PowerAnnotation( "add", List(w0,w1), w, 2) => 0
-//     case PowerAnnotation( "sub", List(w0,w1), w, c) => apply( AreaOp( "add", List(w0,w1), w, c), tbl)
+    case PowerAnnotation(name, "sub", tpe) => {
+      println(s"add named $name of type $tpe")
+      getTypeWidth(tpe).toFloat * activity //*(cMaj+2*cXor)
+    }
 //     case PowerAnnotation( op, List(w0), w, c) if List("shl","shr","shlw").contains( op) => 0
 //     case PowerAnnotation( "dshl", List(w0,w1), w, 0) => cMux4*w0*((w1+1)/2)
 //     case PowerAnnotation( "dshlw", List(w0,w1), w, 0) => cMux4*w0*((w1+1)/2)
@@ -135,11 +140,15 @@ object ComputePower {
 //       w*cNand( inpSizes.size - c)
 //     case PowerAnnotation( "xor", List(w0,w1), w, 0) => w*cXor
 //     case PowerAnnotation( "xor", List(w0,w1), w, c) if c > 0 => 0
-//     case PowerAnnotation( "not", List(w0), w, c) => 0
+    case PowerAnnotation(name, "neg", tpe) => {
+      println(s"neg named $name of type $tpe")
+      0
+    }
 //     case PowerAnnotation( "neq", List(w0,w1), w, c) => apply( AreaOp( "eq", List(w0,w1), w, c), tbl)
-//     case PowerAnnotation( "eq", List(w0,w1), w, 0) => w0*cXor+cNand(w0)
-//     case PowerAnnotation( "eq", inpSizes@List(w0,w1), w, 1) => apply( AreaOp( "and", List.fill(w0.max(w1)){w}, w, 0),tbl)
-//     case PowerAnnotation( "eq", List(w0,w1), w, 2) => 0
+    case PowerAnnotation(name, "eq", tpe) => {
+      println(s"eq named $name of type $tpe")
+      0
+    }
 //     case PowerAnnotation( "mul", List(w0,w1), w, 0) => w0*apply(AreaOp("add", List(w1,w), w, 0),tbl)+apply( AreaOp( "add", List(w,w), w, 0),tbl)
 //     case PowerAnnotation( "mul", List(w0,w1), w, 1) => 0 // only if constant a power of 2 
 //     case PowerAnnotation( "mul", List(w0,w1), w, 2) => 0
@@ -148,15 +157,15 @@ object ComputePower {
 //     case PowerAnnotation( "div", List(w0,w1), w, 2) => 0
 //     case PowerAnnotation( "rem", List(w0,w1), w, c) => apply( AreaOp( "div", List(w0,w1), w, c), tbl)
 //     case PowerAnnotation( op, List(w0,w1), w, c) if List("lt","gt","leq","geq").contains( op) => apply( AreaOp( "add", List(w0,w1), w0, c),tbl)
-//     case PowerAnnotation( "cat", _, _, _) => 0
-//     case PowerAnnotation( "bits", _, _, _) => 0
+    case PowerAnnotation(_, "cat", _) => 0
+    case PowerAnnotation(_, "bits", _) => 0
     case PowerAnnotation(name, "pad", width) => {
       println(s"pad named $name of width $width")
       0
     }
-//     case PowerAnnotation( "tail", _, _, _) => 0
-//     case PowerAnnotation( "asUInt", _, _, _) => 0
-//     case PowerAnnotation( "asSInt", _, _, _) => 0
+    case PowerAnnotation(_, "tail", _) => 0
+    case PowerAnnotation(_, "asUInt", _) => 0
+    case PowerAnnotation(_, "asSInt", _) => 0
 //     case PowerAnnotation( "cvt", _, _, _) => 0
     case PowerAnnotation(name, "reg", width) => {
       println(s"reg named $name of width $width")
@@ -175,7 +184,10 @@ object ComputePower {
 //         0
 //       }
 //     case AreaNone => 0
-    case _ => println( s"unknown op ${a}"); 0
+    case _ => {
+      println( s"unknown op ${a}")
+      0
+    }
   }
 
   def apply( m : mutable.ListBuffer[PowerAnnotation]) : Float =
